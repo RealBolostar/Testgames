@@ -88,6 +88,7 @@
         <div class="categories">
           <button type="button" class="category selected" data-category="solve" aria-pressed="true"><strong>Solve for x</strong><span>Find the unknown number in an equation.</span></button>
           <button type="button" class="category" data-category="expand" aria-pressed="false"><strong>Expand Parentheses</strong><span>Multiply out brackets and collect like terms.</span></button>
+          <button type="button" class="category" data-category="multiply" aria-pressed="false"><strong>Integer Multiplication</strong><span>Squares (x + 1)² and conjugates (x + a)(x − a).</span></button>
         </div>
         <div class="difficulty hidden" id="difficulty-block">
           <div class="section-label">Choose difficulty</div>
@@ -156,6 +157,7 @@
     let questions = [], index = 0, correct = 0, started = 0, elapsed = 0, timer = null, answered = false;
     const key = () => category === 'solve'
       ? 'blue-depths-best-perfect-' + total // Keep original records.
+      : category === 'multiply' ? 'blue-depths-best-perfect-multiply-' + total
       : 'blue-depths-best-perfect-expand-' + level + '-' + total;
     function best() { try { return Number(localStorage.getItem(key())) || 0; } catch { return 0; } }
     function saveBest(s) { try { localStorage.setItem(key(), String(s)); } catch {} }
@@ -242,8 +244,73 @@
         leading: A, leadingOf: label => Number(label.match(/^-?\d+/)[0])
       };
     }
-    function makeQuestion() { return category === 'solve' ? solveQuestion() : expandQuestion(level); }
+
+    // Wrong answers reflect common mental-arithmetic errors, not arbitrary numbers.
+    function numericChoices(answer, candidates, step = 1) {
+      const choices = new Set([answer]);
+      for (const candidate of shuffle([...candidates])) {
+        if (choices.size === 6) break;
+        if (Number.isInteger(candidate) && candidate > 0) choices.add(candidate);
+      }
+      // Defensive fallback for small bases where several common errors coincide.
+      for (let offset = 1; choices.size < 6; offset++) {
+        if (answer - offset * step > 0) choices.add(answer - offset * step);
+        if (choices.size < 6) choices.add(answer + offset * step);
+      }
+      return shuffle([...choices].map(String));
+    }
+
+    function multiplyQuestion(base, offset) {
+      let left, right, mistakes;
+      if (offset === 0) {
+        // First square identity: (B + 1)^2 = B^2 + 2B + 1.
+        left = right = base + 1;
+        const square = base * base;
+        mistakes = [
+          square + base + 1, square + base, // Forgot one cross term.
+          square + 2 * base,               // Forgot the final +1.
+          square + 2 * base - 1, square + 2 * base + 2,
+          square + 2 * base + 10, square + 1,
+          square + 2 * base + 100, (base + 2) ** 2,
+          square - 1 // Confused with conjugates.
+        ];
+      } else {
+        // Conjugate identity: (B + k)(B - k) = B^2 - k^2, k = 1, 2, 3.
+        const k = offset, square = base * base;
+        left = base + k;
+        right = base - k;
+        mistakes = [
+          square + k * k, square, square - k, square - 2 * k,
+          square - 2 * k * k, square - (k + 1) ** 2,
+          square - (k - 1) ** 2, square - k * k - 1,
+          square - k * k + 1, square + k,
+          left * left, right * right
+        ];
+      }
+      const answer = left * right;
+      return {
+        text: left + ' × ' + right + ' = ?',
+        answer: String(answer),
+        choices: numericChoices(answer, mistakes)
+      };
+    }
+
+    function makeQuestion() {
+      return category === 'solve' ? solveQuestion()
+        : category === 'expand' ? expandQuestion(level)
+        : multiplyQuestion(10 * rand(1, 10), rand(0, 3));
+    }
     function makeSet(n) {
+      if (category === 'multiply') {
+        // Exactly 40 distinct questions: ten bases times four identities.
+        const pool = [];
+        for (let base = 10; base <= 100; base += 10) {
+          for (let offset = 0; offset <= 3; offset++) {
+            pool.push(multiplyQuestion(base, offset));
+          }
+        }
+        return shuffle(pool).slice(0, n);
+      }
       const result = [], seen = new Set();
       while (result.length < n) {
         const q = makeQuestion();
@@ -287,12 +354,12 @@
       $('counter').textContent = (index + 1) + ' / ' + total;
       $('score').textContent = correct;
       $('progress-fill').style.width = (index / total * 100) + '%';
-      $('question-category').textContent = category === 'solve'
-        ? 'Solve for x'
-        : 'Expand Parentheses · Level ' + level;
-      $('question-text').textContent = category === 'solve'
-        ? 'What is the value of x?'
-        : 'Which expression is equivalent?';
+      $('question-category').textContent = category === 'solve' ? 'Solve for x'
+        : category === 'expand' ? 'Expand Parentheses · Level ' + level
+        : 'Integer Multiplication';
+      $('question-text').textContent = category === 'solve' ? 'What is the value of x?'
+        : category === 'expand' ? 'Which expression is equivalent?'
+        : 'What is the product?';
       $('equation').textContent = q.text;
       $('feedback').textContent = '';
       $('next').classList.add('hidden');
